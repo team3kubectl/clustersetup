@@ -1,93 +1,67 @@
 #!/bin/bash
-set -e
-
-# Kubernetes version (major.minor only)
-KUBEVERSION="v1.34"
-
-echo "Detected Kubernetes version: $KUBEVERSION"
+# This script sets up a Kubernetes environment on Ubuntu
+# Fixed to install Kubernetes version v1.34
 
 # Detect OS
-source /etc/os-release
+MYOS=$(hostnamectl | awk '/Operating/ { print $3 }')
+OSVERSION=$(hostnamectl | awk '/Operating/ { print $4 }')
 
-if [[ "$ID" == "ubuntu" ]]; then
+# Set Kubernetes version manually
+KUBEVERSION="v1.34"
+
+# Check if the operating system is Ubuntu
+if [ $MYOS = "Ubuntu" ]; then
     echo "Running Ubuntu configuration..."
 
     ### Kernel modules ###
     cat <<EOF | sudo tee /etc/modules-load.d/k8s.conf
-overlay
 br_netfilter
 EOF
 
-    sudo modprobe overlay
-    sudo modprobe br_netfilter
-
-    ### Sysctl params ###
-    cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
-net.bridge.bridge-nf-call-iptables  = 1
-net.bridge.bridge-nf-call-ip6tables = 1
-net.ipv4.ip_forward                 = 1
-EOF
-
-    sudo sysctl --system
-
-    ### Disable swap ###
-    sudo swapoff -a
-    sudo sed -i '/ swap / s/^/#/' /etc/fstab
-
     ### Install dependencies ###
-    sudo apt-get update
-    sudo apt-get install -y apt-transport-https ca-certificates curl gpg
+    sudo apt-get update && sudo apt-get install -y apt-transport-https curl
 
-    ### Install containerd ###
-    sudo apt-get install -y containerd
-
-    sudo mkdir -p /etc/containerd
-    containerd config default | sudo tee /etc/containerd/config.toml >/dev/null
-
-    # Use systemd cgroup driver (REQUIRED)
-    sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
-
-    sudo systemctl restart containerd
-    sudo systemctl enable containerd
-
-    ### Add Kubernetes repo ###
+    ### Add Kubernetes repo (v1.34) ###
     sudo mkdir -p /etc/apt/keyrings
 
     curl -fsSL https://pkgs.k8s.io/core:/stable:/${KUBEVERSION}/deb/Release.key \
-        | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
 
     echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] \
-https://pkgs.k8s.io/core:/stable:/${KUBEVERSION}/deb/ /" \
-        | sudo tee /etc/apt/sources.list.d/kubernetes.list
+    https://pkgs.k8s.io/core:/stable:/${KUBEVERSION}/deb/ /" \
+    | sudo tee /etc/apt/sources.list.d/kubernetes.list
+
+    sleep 2
 
     ### Install Kubernetes components ###
     sudo apt-get update
     sudo apt-get install -y kubelet kubeadm kubectl
 
+    ### Hold versions ###
     sudo apt-mark hold kubelet kubeadm kubectl
 
-    ### Configure crictl ###
-    sudo crictl config runtime-endpoint unix:///run/containerd/containerd.sock
-
-    echo ""
-    echo "=============================================="
-    echo " Kubernetes setup completed successfully!"
-    echo "=============================================="
-    echo ""
-    echo "Next steps (Control Plane):"
-    echo "  kubeadm init"
-    echo ""
-    echo "Then configure kubectl:"
-    echo "  mkdir -p \$HOME/.kube"
-    echo "  sudo cp -i /etc/kubernetes/admin.conf \$HOME/.kube/config"
-    echo "  sudo chown \$(id -u):\$(id -g) \$HOME/.kube/config"
-    echo ""
-    echo "Install Calico network plugin:"
-    echo "  kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml"
-    echo ""
-    echo "Worker nodes: use kubeadm join command from control plane"
-
-else
-    echo "Unsupported OS. This script supports Ubuntu only."
-    exit 1
+    ### Disable swap ###
+    sudo swapoff -a
+    sudo sed -i 's/\/swap/#\/swap/' /etc/fstab
 fi
+
+### Sysctl settings ###
+sudo tee /etc/sysctl.d/k8s.conf <<EOF
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+EOF
+
+sudo sysctl --system
+
+### Container runtime config ###
+sudo crictl config --set runtime-endpoint=unix:///run/containerd/containerd.sock
+
+### Post install ###
+echo 'After initializing the control plane node, run:'
+echo 'kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml'
+
+echo -e "\e[1;34m*****************************************\e[0m"
+echo -e "\e[1;34m*  Kubernetes v1.34 setup completed!  *\e[0m"
+echo -e "\e[1;34m*****************************************\e[0m"
+
+exit
