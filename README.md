@@ -10,3 +10,10 @@ git add .
 git commit -m "4"
 git config --global credential.helper store
 git push
+---------------------------
+chmod +x 2-container-setup.sh
+./2-container-setup.sh 
+chmod +x 3-Kubernetes-setup.sh 
+./3-Kubernetes-setup.sh 
+sudo kubeadm init
+----------------------------
